@@ -60,6 +60,7 @@ from .types import IntRange as IntRange
 from .types import ParamType as ParamType
 from .types import Path as Path
 from .types import Pattern as Pattern
+from .types import Range as Range
 from .types import STRING as STRING
 from .types import Tuple as Tuple
 from .types import UNPROCESSED as UNPROCESSED
