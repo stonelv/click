@@ -665,3 +665,79 @@ def _resolve_incomplete(
     # There were no unparsed arguments, the command may be a group that
     # will provide command name completions.
     return ctx.command, incomplete
+
+
+def generate_completion_script(
+    cli: Command,
+    shell: str,
+    prog_name: str | None = None,
+    complete_var: str | None = None,
+    ctx_args: cabc.MutableMapping[str, t.Any] | None = None,
+) -> str:
+    """Generate a shell completion script for the given CLI.
+
+    This function provides a programmatic way to generate completion scripts
+    without needing to invoke the CLI with special environment variables.
+
+    :param cli: The Click Command or Group to generate completion for.
+    :param shell: The shell to generate the script for. One of ``bash``,
+        ``zsh``, or ``fish``.
+    :param prog_name: The name of the executable in the shell. If not
+        provided, uses ``cli.name``.
+    :param complete_var: The environment variable name used to trigger
+        completion. If not provided, defaults to
+        ``_{PROG_NAME}_COMPLETE``.
+    :param ctx_args: Extra arguments to pass to ``cli.make_context``.
+    :return: The generated completion script as a string.
+
+    Example usage::
+
+        import click
+        from click.shell_completion import generate_completion_script
+
+        @click.group()
+        def cli():
+            pass
+
+        # Generate bash completion script
+        bash_script = generate_completion_script(cli, "bash", "mycli")
+        print(bash_script)
+
+    .. versionadded:: 8.3
+    """
+    if ctx_args is None:
+        ctx_args = {}
+
+    if prog_name is None:
+        prog_name = cli.name or "cli"
+
+    if complete_var is None:
+        complete_name = prog_name.replace("-", "_").replace(".", "_")
+        complete_var = f"_{complete_name}_COMPLETE".upper()
+
+    comp_cls = get_completion_class(shell)
+
+    if comp_cls is None:
+        raise ValueError(
+            f"Unsupported shell: {shell}. "
+            f"Supported shells: {list(_available_shells.keys())}"
+        )
+
+    comp = comp_cls(cli, ctx_args, prog_name, complete_var)
+    return comp.source()
+
+
+def list_available_shells() -> list[str]:
+    """Return a list of all available shell names that completion can
+    be generated for.
+
+    :return: A list of shell names.
+
+    Example usage::
+
+        from click.shell_completion import list_available_shells
+        print(list_available_shells())  # ['bash', 'zsh', 'fish']
+
+    .. versionadded:: 8.3
+    """
+    return list(_available_shells.keys())

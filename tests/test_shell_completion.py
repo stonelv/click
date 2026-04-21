@@ -559,3 +559,285 @@ def test_files_closed(runner) -> None:
             assert not current_warnings, "There should be no warnings to start"
             _get_completions(cli, args=[], incomplete="")
             assert not current_warnings, "There should be no warnings after either"
+
+
+from click.shell_completion import generate_completion_script
+from click.shell_completion import list_available_shells
+
+
+class TestGenerateCompletionScript:
+    """Tests for the generate_completion_script function."""
+
+    def test_list_available_shells(self):
+        """Test that list_available_shells returns the supported shells."""
+        shells = list_available_shells()
+        assert isinstance(shells, list)
+        assert "bash" in shells
+        assert "zsh" in shells
+        assert "fish" in shells
+
+    def test_generate_bash_script(self):
+        """Test generating a bash completion script."""
+        @click.group()
+        def cli():
+            pass
+
+        script = generate_completion_script(cli, "bash", "mycli")
+        assert isinstance(script, str)
+        assert "complete" in script
+        assert "mycli" in script
+        assert "_MYCLI_COMPLETE" in script
+
+    def test_generate_zsh_script(self):
+        """Test generating a zsh completion script."""
+        @click.group()
+        def cli():
+            pass
+
+        script = generate_completion_script(cli, "zsh", "mycli")
+        assert isinstance(script, str)
+        assert "#compdef" in script
+        assert "mycli" in script
+        assert "_MYCLI_COMPLETE" in script
+
+    def test_generate_fish_script(self):
+        """Test generating a fish completion script."""
+        @click.group()
+        def cli():
+            pass
+
+        script = generate_completion_script(cli, "fish", "mycli")
+        assert isinstance(script, str)
+        assert "function" in script
+        assert "complete" in script
+        assert "mycli" in script
+        assert "_MYCLI_COMPLETE" in script
+
+    def test_invalid_shell_raises_error(self):
+        """Test that an invalid shell raises ValueError."""
+        @click.group()
+        def cli():
+            pass
+
+        with pytest.raises(ValueError) as exc_info:
+            generate_completion_script(cli, "invalid_shell", "mycli")
+
+        assert "Unsupported shell" in str(exc_info.value)
+        assert "invalid_shell" in str(exc_info.value)
+
+    def test_default_prog_name(self):
+        """Test that prog_name defaults to cli.name."""
+        @click.group()
+        @click.argument("name")
+        def mytool():
+            pass
+
+        script = generate_completion_script(mytool, "bash")
+        assert "mytool" in script
+        assert "_MYTOOL_COMPLETE" in script
+
+    def test_default_prog_name_none(self):
+        """Test that prog_name defaults to 'cli' when cli.name is None."""
+        cli = click.Command(None)
+        script = generate_completion_script(cli, "bash")
+        assert "cli" in script
+        assert "_CLI_COMPLETE" in script
+
+    def test_custom_complete_var(self):
+        """Test using a custom complete_var."""
+        @click.group()
+        def cli():
+            pass
+
+        script = generate_completion_script(
+            cli, "bash", "mycli", complete_var="_CUSTOM_VAR"
+        )
+        assert "_CUSTOM_VAR" in script
+        assert "_MYCLI_COMPLETE" not in script
+
+    def test_with_subcommands(self):
+        """Test generating completion script for CLI with subcommands."""
+        @click.group()
+        def cli():
+            pass
+
+        @cli.command()
+        @click.option("--name", help="Name option")
+        def sub1(name):
+            pass
+
+        @cli.command()
+        def sub2():
+            pass
+
+        script = generate_completion_script(cli, "bash", "mycli")
+        assert isinstance(script, str)
+        assert "mycli" in script
+
+    def test_with_choice_options(self):
+        """Test generating completion script for CLI with Choice options."""
+        @click.command()
+        @click.option("--format", type=click.Choice(["json", "yaml", "xml"]))
+        def cli(format):
+            pass
+
+        script = generate_completion_script(cli, "bash", "mycli")
+        assert isinstance(script, str)
+
+    def test_with_dynamic_completion(self):
+        """Test generating completion script for CLI with dynamic completion."""
+        def complete_things(ctx, param, incomplete):
+            return ["apple", "banana", "cherry"]
+
+        @click.command()
+        @click.argument("thing", shell_complete=complete_things)
+        def cli(thing):
+            pass
+
+        script = generate_completion_script(cli, "bash", "mycli")
+        assert isinstance(script, str)
+
+    @pytest.mark.usefixtures("_patch_for_completion")
+    def test_matches_env_var_method(self, runner):
+        """Test that generate_completion_script matches the env var method."""
+        @click.group()
+        def cli():
+            pass
+
+        generated = generate_completion_script(cli, "bash", "cli")
+
+        result = runner.invoke(cli, env={"_CLI_COMPLETE": "bash_source"})
+
+        assert generated.rstrip("\n") == result.output.rstrip("\n")
+
+
+class TestDemoCLI:
+    """Tests for the demo CLI features (subcommands, choice options, dynamic completion)."""
+
+    def test_subcommand_completion(self):
+        """Test that subcommands are properly completed."""
+        @click.group()
+        def cli():
+            pass
+
+        @cli.command()
+        def init():
+            pass
+
+        @cli.command()
+        def status():
+            pass
+
+        completions = _get_words(cli, [], "")
+        assert "init" in completions
+        assert "status" in completions
+
+    def test_choice_option_completion(self):
+        """Test that Choice option values are properly completed."""
+        cli = Command(
+            "cli",
+            params=[
+                Option(["-f", "--format"], type=Choice(["json", "yaml", "xml"]))
+            ],
+        )
+
+        completions = _get_words(cli, ["--format"], "")
+        assert "json" in completions
+        assert "yaml" in completions
+        assert "xml" in completions
+
+    def test_dynamic_completion(self):
+        """Test that dynamic completion functions work."""
+        def complete_fruits(ctx, param, incomplete):
+            return [
+                CompletionItem("apple", help="Red fruit"),
+                CompletionItem("banana", help="Yellow fruit"),
+                CompletionItem("cherry", help="Red small fruit"),
+            ]
+
+        cli = Command(
+            "cli",
+            params=[
+                Argument(["fruit"], shell_complete=complete_fruits)
+            ],
+        )
+
+        completions = _get_completions(cli, [], "")
+        values = [c.value for c in completions]
+        assert "apple" in values
+        assert "banana" in values
+        assert "cherry" in values
+
+        helps = [c.help for c in completions]
+        assert "Red fruit" in helps
+        assert "Yellow fruit" in helps
+
+    def test_dynamic_completion_with_filter(self):
+        """Test that dynamic completion filters by incomplete value."""
+        def complete_fruits(ctx, param, incomplete):
+            fruits = ["apple", "apricot", "banana", "blueberry"]
+            return [f for f in fruits if f.startswith(incomplete)]
+
+        cli = Command(
+            "cli",
+            params=[
+                Argument(["fruit"], shell_complete=complete_fruits)
+            ],
+        )
+
+        completions = _get_words(cli, [], "a")
+        assert "apple" in completions
+        assert "apricot" in completions
+        assert "banana" not in completions
+
+        completions = _get_words(cli, [], "b")
+        assert "banana" in completions
+        assert "blueberry" in completions
+        assert "apple" not in completions
+
+    def test_nested_subcommands(self):
+        """Test nested subcommand completion."""
+        cli = Group(
+            "cli",
+            commands=[
+                Group(
+                    "user",
+                    commands=[
+                        Command("add"),
+                        Command("delete"),
+                        Command("list"),
+                    ],
+                ),
+                Group(
+                    "project",
+                    commands=[
+                        Command("create"),
+                        Command("delete"),
+                    ],
+                ),
+            ],
+        )
+
+        assert "user" in _get_words(cli, [], "")
+        assert "project" in _get_words(cli, [], "")
+        assert "add" in _get_words(cli, ["user"], "")
+        assert "delete" in _get_words(cli, ["user"], "")
+        assert "create" in _get_words(cli, ["project"], "")
+
+    def test_path_completion_type(self):
+        """Test that Path type provides proper completion type."""
+        cli = Command(
+            "cli",
+            params=[
+                Option(["-f", "--file"], type=Path()),
+                Option(["-d", "--dir"], type=Path(file_okay=False)),
+            ],
+        )
+
+        file_completions = _get_completions(cli, ["--file"], "/test")
+        assert len(file_completions) == 1
+        assert file_completions[0].type == "file"
+
+        dir_completions = _get_completions(cli, ["--dir"], "/test")
+        assert len(dir_completions) == 1
+        assert dir_completions[0].type == "dir"

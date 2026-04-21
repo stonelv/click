@@ -1,0 +1,121 @@
+$ completion-generator
+======================
+
+Demonstrates Click's new completion script generator capabilities.
+
+This example shows:
+- A command to directly generate completion scripts (bash/zsh/fish)
+- Subcommands with nested groups
+- Option value hints using Choice type
+- Dynamic completion candidates using shell_complete functions
+
+Installation
+------------
+
+.. code-block:: bash
+
+    pip install --editable .
+
+Usage
+-----
+
+Generate completion scripts:
+
+.. code-block:: bash
+
+    # Generate bash completion script
+    compgen completion bash
+
+    # Generate zsh completion script
+    compgen completion zsh
+
+    # Generate fish completion script
+    compgen completion fish
+
+    # List available shells
+    compgen completion --list
+
+    # Show installation instructions
+    compgen completion bash --install
+
+Enable Completion
+-----------------
+
+For Bash:
+
+.. code-block:: bash
+
+    eval "$(compgen completion bash)"
+
+Or save to a file:
+
+.. code-block:: bash
+
+    compgen completion bash > ~/.compgen-complete.bash
+    echo ". ~/.compgen-complete.bash" >> ~/.bashrc
+
+For Zsh:
+
+.. code-block:: zsh
+
+    eval "$(compgen completion zsh)"
+
+For Fish:
+
+.. code-block:: fish
+
+    compgen completion fish > ~/.config/fish/completions/compgen.fish
+
+Test the Completion
+-------------------
+
+After enabling completion, try:
+
+.. code-block:: bash
+
+    # Subcommand completion
+    compgen <TAB><TAB>
+    compgen use<TAB>
+
+    # Nested subcommands
+    compgen user <TAB><TAB>
+    compgen user a<TAB>
+
+    # Option completion
+    compgen read -<TAB><TAB>
+    compgen read --out<TAB>
+
+    # Choice value hints
+    compgen read --output <TAB><TAB>      # json, yaml, xml, csv
+    compgen read --mode <TAB><TAB>        # read, write, append
+
+    # Dynamic candidates
+    compgen env <TAB><TAB>                 # Environment variables
+    compgen user add <TAB><TAB>            # Users with descriptions
+
+Programmatic API
+----------------
+
+You can also use the API directly in Python:
+
+.. code-block:: python
+
+    import click
+    from click import generate_completion_script, list_available_shells
+
+    @click.group()
+    def mycli():
+        pass
+
+    # List available shells
+    print(list_available_shells())  # ['bash', 'zsh', 'fish']
+
+    # Generate completion script
+    bash_script = generate_completion_script(mycli, "bash", "mycli")
+    print(bash_script)
+
+    zsh_script = generate_completion_script(mycli, "zsh", "mycli")
+    print(zsh_script)
+
+    fish_script = generate_completion_script(mycli, "fish", "mycli")
+    print(fish_script)
