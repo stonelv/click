@@ -8,11 +8,11 @@ dependencies = [
 ]
 
 [project.scripts]
-compgen = "compgen:cli"
+click-complete = "click_complete:cli"
 
 [build-system]
 requires = ["flit_core<4"]
 build-backend = "flit_core.buildapi"
 
 [tool.flit.module]
-name = "compgen"
+name = "click_complete"

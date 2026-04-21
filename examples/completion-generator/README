@@ -24,19 +24,19 @@ Generate completion scripts:
 .. code-block:: bash
 
     # Generate bash completion script
-    compgen completion bash
+    click-complete completion bash
 
     # Generate zsh completion script
-    compgen completion zsh
+    click-complete completion zsh
 
     # Generate fish completion script
-    compgen completion fish
+    click-complete completion fish
 
     # List available shells
-    compgen completion --list
+    click-complete completion --list
 
     # Show installation instructions
-    compgen completion bash --install
+    click-complete completion bash --install
 
 Enable Completion
 -----------------
@@ -45,26 +45,26 @@ For Bash:
 
 .. code-block:: bash
 
-    eval "$(compgen completion bash)"
+    eval "$(click-complete completion bash)"
 
 Or save to a file:
 
 .. code-block:: bash
 
-    compgen completion bash > ~/.compgen-complete.bash
-    echo ". ~/.compgen-complete.bash" >> ~/.bashrc
+    click-complete completion bash > ~/.click-complete-complete.bash
+    echo ". ~/.click-complete-complete.bash" >> ~/.bashrc
 
 For Zsh:
 
 .. code-block:: zsh
 
-    eval "$(compgen completion zsh)"
+    eval "$(click-complete completion zsh)"
 
 For Fish:
 
 .. code-block:: fish
 
-    compgen completion fish > ~/.config/fish/completions/compgen.fish
+    click-complete completion fish > ~/.config/fish/completions/click-complete.fish
 
 Test the Completion
 -------------------
@@ -74,24 +74,24 @@ After enabling completion, try:
 .. code-block:: bash
 
     # Subcommand completion
-    compgen <TAB><TAB>
-    compgen use<TAB>
+    click-complete <TAB><TAB>
+    click-complete use<TAB>
 
     # Nested subcommands
-    compgen user <TAB><TAB>
-    compgen user a<TAB>
+    click-complete user <TAB><TAB>
+    click-complete user a<TAB>
 
     # Option completion
-    compgen read -<TAB><TAB>
-    compgen read --out<TAB>
+    click-complete read -<TAB><TAB>
+    click-complete read --out<TAB>
 
     # Choice value hints
-    compgen read --output <TAB><TAB>      # json, yaml, xml, csv
-    compgen read --mode <TAB><TAB>        # read, write, append
+    click-complete read --output <TAB><TAB>      # json, yaml, xml, csv
+    click-complete read --mode <TAB><TAB>        # read, write, append
 
     # Dynamic candidates
-    compgen env <TAB><TAB>                 # Environment variables
-    compgen user add <TAB><TAB>            # Users with descriptions
+    click-complete env <TAB><TAB>                 # Environment variables
+    click-complete user add <TAB><TAB>            # Users with descriptions
 
 Programmatic API
 ----------------

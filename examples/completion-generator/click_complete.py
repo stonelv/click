@@ -132,11 +132,11 @@ def completion_cmd(shell, list_shells, prog_name, install):
     It can output completion scripts for bash, zsh, and fish.
 
     Examples:
-      compgen completion bash          # Generate bash completion script
-      compgen completion zsh           # Generate zsh completion script
-      compgen completion fish          # Generate fish completion script
-      compgen completion --list        # List available shells
-      compgen completion bash --install # Show installation instructions
+      click-complete completion bash          # Generate bash completion script
+      click-complete completion zsh           # Generate zsh completion script
+      click-complete completion fish          # Generate fish completion script
+      click-complete completion --list        # List available shells
+      click-complete completion bash --install # Show installation instructions
     """
     if list_shells:
         shells = list_available_shells()
@@ -154,7 +154,7 @@ def completion_cmd(shell, list_shells, prog_name, install):
         script = generate_completion_script(
             cli=cli,
             shell=shell,
-            prog_name=prog_name or "compgen"
+            prog_name=prog_name or "click-complete"
         )
 
         if install:
@@ -162,23 +162,23 @@ def completion_cmd(shell, list_shells, prog_name, install):
             click.echo("#")
             if shell == "bash":
                 click.echo("# Add this to ~/.bashrc:")
-                click.echo(f'#   eval "$({prog_name or "compgen"} completion bash)"')
+                click.echo(f'#   eval "$({prog_name or "click-complete"} completion bash)"')
                 click.echo("#")
                 click.echo("# Or save to a file:")
-                click.echo(f'#   {prog_name or "compgen"} completion bash > ~/.compgen-complete.bash')
+                click.echo(f'#   {prog_name or "click-complete"} completion bash > ~/.click-complete-complete.bash')
                 click.echo("#   Then add to ~/.bashrc:")
-                click.echo("#   . ~/.compgen-complete.bash")
+                click.echo("#   . ~/.click-complete-complete.bash")
             elif shell == "zsh":
                 click.echo("# Add this to ~/.zshrc:")
-                click.echo(f'#   eval "$({prog_name or "compgen"} completion zsh)"')
+                click.echo(f'#   eval "$({prog_name or "click-complete"} completion zsh)"')
                 click.echo("#")
                 click.echo("# Or save to a file:")
-                click.echo(f'#   {prog_name or "compgen"} completion zsh > ~/.compgen-complete.zsh')
+                click.echo(f'#   {prog_name or "click-complete"} completion zsh > ~/.click-complete-complete.zsh')
                 click.echo("#   Then add to ~/.zshrc:")
-                click.echo("#   . ~/.compgen-complete.zsh")
+                click.echo("#   . ~/.click-complete-complete.zsh")
             elif shell == "fish":
                 click.echo("# Save to fish completions directory:")
-                click.echo(f'#   {prog_name or "compgen"} completion fish > ~/.config/fish/completions/{prog_name or "compgen"}.fish')
+                click.echo(f'#   {prog_name or "click-complete"} completion fish > ~/.config/fish/completions/{prog_name or "click-complete"}.fish')
             click.echo("#")
             click.echo("# Generated script:")
             click.echo("# " + "=" * 60)

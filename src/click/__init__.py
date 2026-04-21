@@ -70,14 +70,8 @@ from .utils import get_binary_stream as get_binary_stream
 from .utils import get_text_stream as get_text_stream
 from .utils import open_file as open_file
 
-from .shell_completion import BashComplete as BashComplete
 from .shell_completion import CompletionItem as CompletionItem
-from .shell_completion import FishComplete as FishComplete
-from .shell_completion import ShellComplete as ShellComplete
-from .shell_completion import ZshComplete as ZshComplete
-from .shell_completion import add_completion_class as add_completion_class
 from .shell_completion import generate_completion_script as generate_completion_script
-from .shell_completion import get_completion_class as get_completion_class
 from .shell_completion import list_available_shells as list_available_shells
 
 
