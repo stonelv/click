@@ -11,6 +11,8 @@ from click.core import Group
 from click.core import Option
 from click.shell_completion import add_completion_class
 from click.shell_completion import CompletionItem
+from click.shell_completion import generate_completion_script
+from click.shell_completion import list_available_shells
 from click.shell_completion import ShellComplete
 from click.types import Choice
 from click.types import File
@@ -561,10 +563,6 @@ def test_files_closed(runner) -> None:
             assert not current_warnings, "There should be no warnings after either"
 
 
-from click.shell_completion import generate_completion_script
-from click.shell_completion import list_available_shells
-
-
 class TestGenerateCompletionScript:
     """Tests for the generate_completion_script function."""
 
@@ -708,6 +706,80 @@ class TestGenerateCompletionScript:
 
         result = runner.invoke(cli, env={"_CLI_COMPLETE": "bash_source"})
 
+        assert generated.rstrip("\n") == result.output.rstrip("\n")
+
+    @pytest.mark.parametrize(
+        ("prog_name", "expected_var"),
+        [
+            ("mycli", "_MYCLI_COMPLETE"),
+            ("my-cli", "_MY_CLI_COMPLETE"),
+            ("my.cli", "_MY_CLI_COMPLETE"),
+            ("my-cli.app", "_MY_CLI_APP_COMPLETE"),
+            ("foo-bar.baz-qux", "_FOO_BAR_BAZ_QUX_COMPLETE"),
+        ],
+    )
+    @pytest.mark.usefixtures("_patch_for_completion")
+    def test_prog_name_special_chars_complete_var(self, runner, prog_name, expected_var):
+        """Test that prog_name with -/. generates correct complete_var.
+
+        This ensures generate_completion_script uses the same complete_var
+        calculation as _main_shell_completion in the existing env var method.
+        """
+        @click.group()
+        def cli():
+            pass
+
+        generated = generate_completion_script(cli, "bash", prog_name)
+        assert expected_var in generated
+
+        result = runner.invoke(
+            cli,
+            env={expected_var: "bash_source"},
+            prog_name=prog_name,
+        )
+
+        assert generated.rstrip("\n") == result.output.rstrip("\n")
+
+    @pytest.mark.usefixtures("_patch_for_completion")
+    def test_prog_name_with_dash_matches_env_var(self, runner):
+        """Test prog_name with hyphen: my-cli should use _MY_CLI_COMPLETE."""
+        @click.group()
+        def cli():
+            pass
+
+        prog_name = "my-cli"
+        expected_var = "_MY_CLI_COMPLETE"
+
+        generated = generate_completion_script(cli, "bash", prog_name)
+        assert expected_var in generated
+        assert "my-cli" in generated
+
+        result = runner.invoke(
+            cli,
+            env={expected_var: "bash_source"},
+            prog_name=prog_name,
+        )
+        assert generated.rstrip("\n") == result.output.rstrip("\n")
+
+    @pytest.mark.usefixtures("_patch_for_completion")
+    def test_prog_name_with_dot_matches_env_var(self, runner):
+        """Test prog_name with dot: my.cli should use _MY_CLI_COMPLETE."""
+        @click.group()
+        def cli():
+            pass
+
+        prog_name = "my.cli"
+        expected_var = "_MY_CLI_COMPLETE"
+
+        generated = generate_completion_script(cli, "bash", prog_name)
+        assert expected_var in generated
+        assert "my.cli" in generated
+
+        result = runner.invoke(
+            cli,
+            env={expected_var: "bash_source"},
+            prog_name=prog_name,
+        )
         assert generated.rstrip("\n") == result.output.rstrip("\n")
 
 
