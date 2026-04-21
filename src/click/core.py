@@ -5,7 +5,6 @@ import enum
 import errno
 import inspect
 import os
-import re
 import sys
 import typing as t
 from collections import abc
@@ -49,21 +48,6 @@ if t.TYPE_CHECKING:
     from .shell_completion import CompletionItem
 
 F = t.TypeVar("F", bound="t.Callable[..., t.Any]")
-
-
-class ValidationError(BadParameter):
-    """Raised when a parameter fails validation.
-
-    This exception is used for validation errors that occur during
-    parameter processing, such as range checks, regex pattern matching,
-    or parameter dependency checks.
-
-    :param message: The error message to display.
-    :param ctx: The current context.
-    :param param: The parameter that failed validation.
-    """
-
-    pass
 V = t.TypeVar("V")
 
 
@@ -1203,7 +1187,7 @@ class Command:
         mutual exclusivity.
 
         :param ctx: The current context.
-        :raises ValidationError: If any parameter relationship constraint is violated.
+        :raises BadParameter: If any parameter relationship constraint is violated.
         """
         params = self.get_params(ctx)
 
@@ -1236,7 +1220,7 @@ class Command:
                             if required_param
                             else f"'{required_param_name}'"
                         )
-                        raise ValidationError(
+                        raise BadParameter(
                             _(
                                 "{param} requires {required_param} to be set."
                             ).format(
@@ -1264,7 +1248,7 @@ class Command:
                             if exclusive_param
                             else f"'{exclusive_param_name}'"
                         )
-                        raise ValidationError(
+                        raise BadParameter(
                             _(
                                 "{param} cannot be used with {exclusive_param}."
                             ).format(
@@ -2258,16 +2242,8 @@ class Parameter:
         ]
         | None = None,
         deprecated: bool | str = False,
-        min_val: t.Any | None = None,
-        max_val: t.Any | None = None,
-        min_open: bool = False,
-        max_open: bool = False,
-        regex: str | re.Pattern[str] | None = None,
-        pattern: str | re.Pattern[str] | None = None,
         requires: str | cabc.Sequence[str] | None = None,
         exclusive_with: str | cabc.Sequence[str] | None = None,
-        validation_callback: t.Callable[[Context, Parameter, t.Any], t.Any]
-        | None = None,
     ) -> None:
         self.name: str | None
         self.opts: list[str]
@@ -2297,16 +2273,6 @@ class Parameter:
         self._custom_shell_complete = shell_complete
         self.deprecated = deprecated
 
-        self.min_val = min_val
-        self.max_val = max_val
-        self.min_open = min_open
-        self.max_open = max_open
-
-        if pattern is not None:
-            self.regex: re.Pattern[str] | None = self._compile_regex(pattern)
-        else:
-            self.regex = self._compile_regex(regex)
-
         if isinstance(requires, str):
             self.requires: list[str] = [requires]
         elif requires is not None:
@@ -2321,8 +2287,6 @@ class Parameter:
         else:
             self.exclusive_with = []
 
-        self.validation_callback = validation_callback
-
         if __debug__:
             if self.type.is_composite and nargs != self.type.arity:
                 raise ValueError(
@@ -2336,146 +2300,6 @@ class Parameter:
                     "is deprecated and still required. A deprecated "
                     f"{self.param_type_name} cannot be required."
                 )
-
-    def _compile_regex(
-        self, regex: str | re.Pattern[str] | None
-    ) -> re.Pattern[str] | None:
-        """Compile a regex pattern if provided as a string."""
-        if regex is None:
-            return None
-        if isinstance(regex, re.Pattern):
-            return regex
-        return re.compile(regex)
-
-    def _get_validation_range_description(self) -> str:
-        """Get a human-readable description of the validation range."""
-        if self.min_val is None and self.max_val is None:
-            return ""
-
-        if self.min_val is None:
-            op = "<" if self.max_open else "<="
-            return f"x{op}{self.max_val}"
-
-        if self.max_val is None:
-            op = ">" if self.min_open else ">="
-            return f"x{op}{self.min_val}"
-
-        lop = "<" if self.min_open else "<="
-        rop = "<" if self.max_open else "<="
-        return f"{self.min_val}{lop}x{rop}{self.max_val}"
-
-    def _validate_range(self, ctx: Context, value: t.Any) -> None:
-        """Validate that the value is within the allowed range.
-
-        :param ctx: The current context.
-        :param value: The value to validate.
-        :raises ValidationError: If the value is outside the allowed range.
-        """
-        if self.min_val is None and self.max_val is None:
-            return
-
-        import operator
-
-        lt_min: bool = self.min_val is not None and (
-            operator.le if self.min_open else operator.lt
-        )(value, self.min_val)
-        gt_max: bool = self.max_val is not None and (
-            operator.ge if self.max_open else operator.gt
-        )(value, self.max_val)
-
-        if lt_min or gt_max:
-            range_desc = self._get_validation_range_description()
-            raise ValidationError(
-                _("{value} is not in the range {range}.").format(
-                    value=value, range=range_desc
-                ),
-                ctx=ctx,
-                param=self,
-            )
-
-    def _validate_regex(self, ctx: Context, value: str) -> None:
-        """Validate that the string value matches the regex pattern.
-
-        :param ctx: The current context.
-        :param value: The string value to validate.
-        :raises ValidationError: If the value does not match the pattern.
-        """
-        if self.regex is None:
-            return
-
-        if not self.regex.match(value):
-            pattern_str = (
-                self.regex.pattern
-                if isinstance(self.regex.pattern, str)
-                else str(self.regex.pattern)
-            )
-            raise ValidationError(
-                _("{value!r} does not match the pattern {pattern!r}.").format(
-                    value=value, pattern=pattern_str
-                ),
-                ctx=ctx,
-                param=self,
-            )
-
-    def _validate_single_value(self, ctx: Context, value: t.Any) -> t.Any:
-        """Validate a single value (not multiple, not nargs tuple).
-
-        :param ctx: The current context.
-        :param value: The value to validate.
-        :return: The validated value (possibly modified).
-        """
-        if value is None:
-            return value
-
-        if isinstance(value, (int, float)) and (
-            self.min_val is not None or self.max_val is not None
-        ):
-            self._validate_range(ctx, value)
-
-        if isinstance(value, str) and self.regex is not None:
-            self._validate_regex(ctx, value)
-
-        if self.validation_callback is not None:
-            value = self.validation_callback(ctx, self, value)
-
-        return value
-
-    def _validate_value(self, ctx: Context, value: t.Any) -> t.Any:
-        """Validate the parameter value according to all validation rules.
-
-        This handles multiple values (multiple=True) and nargs tuples.
-
-        :param ctx: The current context.
-        :param value: The value to validate.
-        :return: The validated value (possibly modified).
-        """
-        if value is None:
-            return value
-
-        if self.multiple:
-            validated_values = []
-            for item in value:
-                if isinstance(item, tuple) and self.nargs > 1:
-                    validated = tuple(
-                        self._validate_single_value(ctx, sub_item)
-                        for sub_item in item
-                    )
-                    validated_values.append(validated)
-                else:
-                    validated_values.append(self._validate_single_value(ctx, item))
-            return tuple(validated_values)
-
-        if self.nargs > 1 and isinstance(value, tuple):
-            return tuple(
-                self._validate_single_value(ctx, item) for item in value
-            )
-
-        if self.nargs == -1 and isinstance(value, tuple):
-            return tuple(
-                self._validate_single_value(ctx, item) for item in value
-            )
-
-        return self._validate_single_value(ctx, value)
 
     def to_info_dict(self) -> dict[str, t.Any]:
         """Gather information that could be useful for a tool generating
@@ -2505,20 +2329,6 @@ class Parameter:
             "envvar": self.envvar,
         }
 
-        if self.min_val is not None:
-            info_dict["min_val"] = self.min_val
-        if self.max_val is not None:
-            info_dict["max_val"] = self.max_val
-        if self.min_open:
-            info_dict["min_open"] = self.min_open
-        if self.max_open:
-            info_dict["max_open"] = self.max_open
-        if self.regex is not None:
-            info_dict["regex"] = (
-                self.regex.pattern
-                if isinstance(self.regex.pattern, str)
-                else str(self.regex.pattern)
-            )
         if self.requires:
             info_dict["requires"] = self.requires
         if self.exclusive_with:
@@ -2729,8 +2539,7 @@ class Parameter:
         1. Type cast the value using :meth:`type_cast_value`.
         2. Check if the value is missing (see: :meth:`value_is_missing`), and raise
            :exc:`MissingParameter` if it is required.
-        3. Validate the value using all validation rules (range, regex, etc.).
-        4. If a :attr:`callback` is set, call it to have the value replaced by the
+        3. If a :attr:`callback` is set, call it to have the value replaced by the
            result of the callback. If the value was not set, the callback receive
            ``None``. This keep the legacy behavior as it was before the introduction of
            the :attr:`UNSET` sentinel.
@@ -2750,9 +2559,6 @@ class Parameter:
 
         if self.required and self.value_is_missing(value):
             raise MissingParameter(ctx=ctx, param=self)
-
-        if not self.value_is_missing(value):
-            value = self._validate_value(ctx, value)
 
         if self.callback is not None:
             # Legacy case: UNSET is not exposed directly to the callback, but converted
@@ -3444,21 +3250,12 @@ class Option(Parameter):
             if range_str:
                 extra["range"] = range_str
 
-        if self.min_val is not None or self.max_val is not None:
-            validation_range_str = self._get_validation_range_description()
-            if validation_range_str:
-                if "range" in extra:
-                    extra["range"] = f"{extra['range']}, {validation_range_str}"
-                else:
-                    extra["range"] = validation_range_str
-
-        if self.regex is not None:
-            pattern_str = (
-                self.regex.pattern
-                if isinstance(self.regex.pattern, str)
-                else str(self.regex.pattern)
-            )
-            extra["pattern"] = f"pattern: {pattern_str}"
+        if isinstance(self.type, types.Pattern):
+            pattern_str = self.type.regex.pattern
+            if isinstance(pattern_str, str):
+                extra["pattern"] = f"pattern: {pattern_str}"
+            else:
+                extra["pattern"] = f"pattern: {str(pattern_str)}"
 
         if self.required:
             extra["required"] = "required"

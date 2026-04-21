@@ -3,6 +3,7 @@ from __future__ import annotations
 import collections.abc as cabc
 import enum
 import os
+import re
 import stat
 import sys
 import typing as t
@@ -1202,8 +1203,61 @@ BOOL = BoolParamType()
 UUID = UUIDParameterType()
 
 
+class Pattern(ParamType):
+    """Restrict a string parameter to match a regular expression pattern.
+
+    The pattern is matched against the entire string using
+    :func:`re.fullmatch`, which means the entire string must match the
+    pattern. Use ``^`` and ``$`` in your pattern if you want to match
+    only at the start or end, respectively.
+
+    :param regex: The regular expression pattern to match. Can be a string
+        or a compiled :class:`re.Pattern`.
+    :param flags: Optional flags for the regex compilation. Only used if
+        ``regex`` is a string.
+
+    .. versionadded:: 8.3.0
+    """
+
+    name = "pattern"
+
+    def __init__(
+        self,
+        regex: str | re.Pattern[str],
+        flags: int = 0,
+    ) -> None:
+        if isinstance(regex, str):
+            self.regex: re.Pattern[str] = re.compile(regex, flags)
+        else:
+            self.regex = regex
+
+    def to_info_dict(self) -> dict[str, t.Any]:
+        info_dict = super().to_info_dict()
+        info_dict.update(regex=self.regex.pattern)
+        return info_dict
+
+    def convert(
+        self, value: t.Any, param: Parameter | None, ctx: Context | None
+    ) -> t.Any:
+        if isinstance(value, str):
+            if not self.regex.fullmatch(value):
+                self.fail(
+                    _("{value!r} does not match the pattern {pattern!r}.").format(
+                        value=value, pattern=self.regex.pattern
+                    ),
+                    param,
+                    ctx,
+                )
+
+        return value
+
+    def __repr__(self) -> str:
+        return f"Pattern({self.regex.pattern!r})"
+
+
 class OptionHelpExtra(t.TypedDict, total=False):
     envvars: tuple[str, ...]
     default: str
     range: str
+    pattern: str
     required: str

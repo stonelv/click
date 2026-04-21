@@ -14,7 +14,6 @@ from .core import Context as Context
 from .core import Group as Group
 from .core import Option as Option
 from .core import Parameter as Parameter
-from .core import ValidationError as ValidationError
 from .decorators import argument as argument
 from .decorators import command as command
 from .decorators import confirmation_option as confirmation_option
@@ -60,6 +59,7 @@ from .types import INT as INT
 from .types import IntRange as IntRange
 from .types import ParamType as ParamType
 from .types import Path as Path
+from .types import Pattern as Pattern
 from .types import STRING as STRING
 from .types import Tuple as Tuple
 from .types import UNPROCESSED as UNPROCESSED
