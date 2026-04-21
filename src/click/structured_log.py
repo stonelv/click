@@ -286,6 +286,64 @@ def _make_json_serializable(obj: t.Any) -> t.Any:
 META_KEY = "click.structured_log"
 
 
+def _invoke_with_structured_log(
+    ctx: Context,
+    invoke_func: t.Callable[[Context], t.Any],
+    command_type_label: str,
+) -> t.Any:
+    config = _get_log_config(ctx)
+    manager = get_structured_log_manager(ctx)
+
+    start_time = time.perf_counter()
+
+    try:
+        manager._trigger_before_invoke(ctx, config)
+
+        if config.enabled:
+            manager.log(
+                LogLevel.INFO,
+                ctx,
+                f"Starting {command_type_label}: {getattr(ctx.command, 'name', 'unknown')}",
+                config=config,
+            )
+
+        result = invoke_func(ctx)
+
+        duration_ms = (time.perf_counter() - start_time) * 1000
+
+        manager._trigger_after_invoke(ctx, result, config, duration_ms)
+
+        if config.enabled:
+            manager.log(
+                LogLevel.INFO,
+                ctx,
+                f"{command_type_label.capitalize()} completed successfully: {getattr(ctx.command, 'name', 'unknown')}",
+                duration_ms=duration_ms,
+                config=config,
+            )
+
+        return result
+
+    except BaseException as exc:
+        duration_ms = (time.perf_counter() - start_time) * 1000
+
+        manager._trigger_on_exception(ctx, exc, config, duration_ms)
+
+        if config.enabled:
+            is_click_exception = hasattr(exc, "exit_code")
+            level = LogLevel.ERROR if is_click_exception else LogLevel.CRITICAL
+
+            manager.log(
+                level,
+                ctx,
+                f"{command_type_label.capitalize()} failed: {type(exc).__name__}: {exc}",
+                duration_ms=duration_ms,
+                exception=exc,
+                config=config,
+            )
+        raise
+
+
 def _get_log_config(ctx: Context) -> StructuredLogConfig:
     config = ctx.meta.get(META_KEY)
     if config is None:
@@ -358,111 +416,19 @@ class StructuredLogCommand(Command):
     context_class: type[Context] = Context
 
     def invoke(self, ctx: Context) -> t.Any:
-        config = _get_log_config(ctx)
-        manager = get_structured_log_manager(ctx)
-
-        start_time = time.perf_counter()
-
-        try:
-            manager._trigger_before_invoke(ctx, config)
-
-            if config.enabled:
-                manager.log(
-                    LogLevel.INFO,
-                    ctx,
-                    f"Starting command: {getattr(ctx.command, 'name', 'unknown')}",
-                    config=config,
-                )
-
-            result = super().invoke(ctx)
-
-            duration_ms = (time.perf_counter() - start_time) * 1000
-
-            manager._trigger_after_invoke(ctx, result, config, duration_ms)
-
-            if config.enabled:
-                manager.log(
-                    LogLevel.INFO,
-                    ctx,
-                    f"Command completed successfully: {getattr(ctx.command, 'name', 'unknown')}",
-                    duration_ms=duration_ms,
-                    config=config,
-                )
-
-            return result
-
-        except BaseException as exc:
-            duration_ms = (time.perf_counter() - start_time) * 1000
-
-            manager._trigger_on_exception(ctx, exc, config, duration_ms)
-
-            if config.enabled:
-                is_click_exception = hasattr(exc, "exit_code")
-                level = LogLevel.ERROR if is_click_exception else LogLevel.CRITICAL
-
-                manager.log(
-                    level,
-                    ctx,
-                    f"Command failed: {type(exc).__name__}: {exc}",
-                    duration_ms=duration_ms,
-                    exception=exc,
-                    config=config,
-                )
-            raise
+        return _invoke_with_structured_log(
+            ctx,
+            super().invoke,
+            "command",
+        )
 
 
 class StructuredLogGroup(Group):
     context_class: type[Context] = Context
 
     def invoke(self, ctx: Context) -> t.Any:
-        config = _get_log_config(ctx)
-        manager = get_structured_log_manager(ctx)
-
-        start_time = time.perf_counter()
-
-        try:
-            manager._trigger_before_invoke(ctx, config)
-
-            if config.enabled:
-                manager.log(
-                    LogLevel.INFO,
-                    ctx,
-                    f"Starting group: {getattr(ctx.command, 'name', 'unknown')}",
-                    config=config,
-                )
-
-            result = super().invoke(ctx)
-
-            duration_ms = (time.perf_counter() - start_time) * 1000
-
-            manager._trigger_after_invoke(ctx, result, config, duration_ms)
-
-            if config.enabled:
-                manager.log(
-                    LogLevel.INFO,
-                    ctx,
-                    f"Group completed: {getattr(ctx.command, 'name', 'unknown')}",
-                    duration_ms=duration_ms,
-                    config=config,
-                )
-
-            return result
-
-        except BaseException as exc:
-            duration_ms = (time.perf_counter() - start_time) * 1000
-
-            manager._trigger_on_exception(ctx, exc, config, duration_ms)
-
-            if config.enabled:
-                is_click_exception = hasattr(exc, "exit_code")
-                level = LogLevel.ERROR if is_click_exception else LogLevel.CRITICAL
-
-                manager.log(
-                    level,
-                    ctx,
-                    f"Group failed: {type(exc).__name__}: {exc}",
-                    duration_ms=duration_ms,
-                    exception=exc,
-                    config=config,
-                )
-            raise
+        return _invoke_with_structured_log(
+            ctx,
+            super().invoke,
+            "group",
+        )
