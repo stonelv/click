@@ -5,6 +5,7 @@ import enum
 import errno
 import inspect
 import os
+import re
 import sys
 import typing as t
 from collections import abc
@@ -48,6 +49,21 @@ if t.TYPE_CHECKING:
     from .shell_completion import CompletionItem
 
 F = t.TypeVar("F", bound="t.Callable[..., t.Any]")
+
+
+class ValidationError(BadParameter):
+    """Raised when a parameter fails validation.
+
+    This exception is used for validation errors that occur during
+    parameter processing, such as range checks, regex pattern matching,
+    or parameter dependency checks.
+
+    :param message: The error message to display.
+    :param ctx: The current context.
+    :param param: The parameter that failed validation.
+    """
+
+    pass
 V = t.TypeVar("V")
 
 
@@ -1179,6 +1195,100 @@ class Command:
             with formatter.indentation():
                 formatter.write_text(epilog)
 
+    def _validate_param_relationships(self, ctx: Context) -> None:
+        """Validate parameter relationships (requires, exclusive_with).
+
+        This method is called after all parameters have been processed
+        to check for inter-parameter constraints like dependencies and
+        mutual exclusivity.
+
+        :param ctx: The current context.
+        :raises ValidationError: If any parameter relationship constraint is violated.
+        """
+        params = self.get_params(ctx)
+
+        for param in params:
+            param_name = param.name
+            if param_name is None:
+                continue
+
+            param_source = ctx.get_parameter_source(param_name)
+            param_is_set = (
+                param_source is not None
+                and param_source != ParameterSource.DEFAULT
+                and param_source != ParameterSource.DEFAULT_MAP
+            )
+
+            if param.requires and param_is_set:
+                for required_param_name in param.requires:
+                    required_source = ctx.get_parameter_source(required_param_name)
+                    required_is_set = (
+                        required_source is not None
+                        and required_source != ParameterSource.DEFAULT
+                        and required_source != ParameterSource.DEFAULT_MAP
+                    )
+                    if not required_is_set:
+                        required_param = self._find_param_by_name(
+                            params, required_param_name
+                        )
+                        required_hint = (
+                            required_param.get_error_hint(ctx)
+                            if required_param
+                            else f"'{required_param_name}'"
+                        )
+                        raise ValidationError(
+                            _(
+                                "{param} requires {required_param} to be set."
+                            ).format(
+                                param=param.get_error_hint(ctx),
+                                required_param=required_hint,
+                            ),
+                            ctx=ctx,
+                            param=param,
+                        )
+
+            if param.exclusive_with and param_is_set:
+                for exclusive_param_name in param.exclusive_with:
+                    exclusive_source = ctx.get_parameter_source(exclusive_param_name)
+                    exclusive_is_set = (
+                        exclusive_source is not None
+                        and exclusive_source != ParameterSource.DEFAULT
+                        and exclusive_source != ParameterSource.DEFAULT_MAP
+                    )
+                    if exclusive_is_set:
+                        exclusive_param = self._find_param_by_name(
+                            params, exclusive_param_name
+                        )
+                        exclusive_hint = (
+                            exclusive_param.get_error_hint(ctx)
+                            if exclusive_param
+                            else f"'{exclusive_param_name}'"
+                        )
+                        raise ValidationError(
+                            _(
+                                "{param} cannot be used with {exclusive_param}."
+                            ).format(
+                                param=param.get_error_hint(ctx),
+                                exclusive_param=exclusive_hint,
+                            ),
+                            ctx=ctx,
+                            param=param,
+                        )
+
+    def _find_param_by_name(
+        self, params: cabc.Sequence[Parameter], name: str
+    ) -> Parameter | None:
+        """Find a parameter by its name.
+
+        :param params: List of parameters to search.
+        :param name: Name of the parameter to find.
+        :return: The parameter if found, None otherwise.
+        """
+        for param in params:
+            if param.name == name:
+                return param
+        return None
+
     def make_context(
         self,
         info_name: str | None,
@@ -1225,6 +1335,9 @@ class Command:
 
         for param in iter_params_for_processing(param_order, self.get_params(ctx)):
             _, args = param.handle_parse_result(ctx, opts, args)
+
+        if not ctx.resilient_parsing:
+            self._validate_param_relationships(ctx)
 
         # We now have all parameters' values into `ctx.params`, but the data may contain
         # the `UNSET` sentinel.
@@ -2145,6 +2258,16 @@ class Parameter:
         ]
         | None = None,
         deprecated: bool | str = False,
+        min_val: t.Any | None = None,
+        max_val: t.Any | None = None,
+        min_open: bool = False,
+        max_open: bool = False,
+        regex: str | re.Pattern[str] | None = None,
+        pattern: str | re.Pattern[str] | None = None,
+        requires: str | cabc.Sequence[str] | None = None,
+        exclusive_with: str | cabc.Sequence[str] | None = None,
+        validation_callback: t.Callable[[Context, Parameter, t.Any], t.Any]
+        | None = None,
     ) -> None:
         self.name: str | None
         self.opts: list[str]
@@ -2174,6 +2297,32 @@ class Parameter:
         self._custom_shell_complete = shell_complete
         self.deprecated = deprecated
 
+        self.min_val = min_val
+        self.max_val = max_val
+        self.min_open = min_open
+        self.max_open = max_open
+
+        if pattern is not None:
+            self.regex: re.Pattern[str] | None = self._compile_regex(pattern)
+        else:
+            self.regex = self._compile_regex(regex)
+
+        if isinstance(requires, str):
+            self.requires: list[str] = [requires]
+        elif requires is not None:
+            self.requires = list(requires)
+        else:
+            self.requires = []
+
+        if isinstance(exclusive_with, str):
+            self.exclusive_with: list[str] = [exclusive_with]
+        elif exclusive_with is not None:
+            self.exclusive_with = list(exclusive_with)
+        else:
+            self.exclusive_with = []
+
+        self.validation_callback = validation_callback
+
         if __debug__:
             if self.type.is_composite and nargs != self.type.arity:
                 raise ValueError(
@@ -2188,6 +2337,146 @@ class Parameter:
                     f"{self.param_type_name} cannot be required."
                 )
 
+    def _compile_regex(
+        self, regex: str | re.Pattern[str] | None
+    ) -> re.Pattern[str] | None:
+        """Compile a regex pattern if provided as a string."""
+        if regex is None:
+            return None
+        if isinstance(regex, re.Pattern):
+            return regex
+        return re.compile(regex)
+
+    def _get_validation_range_description(self) -> str:
+        """Get a human-readable description of the validation range."""
+        if self.min_val is None and self.max_val is None:
+            return ""
+
+        if self.min_val is None:
+            op = "<" if self.max_open else "<="
+            return f"x{op}{self.max_val}"
+
+        if self.max_val is None:
+            op = ">" if self.min_open else ">="
+            return f"x{op}{self.min_val}"
+
+        lop = "<" if self.min_open else "<="
+        rop = "<" if self.max_open else "<="
+        return f"{self.min_val}{lop}x{rop}{self.max_val}"
+
+    def _validate_range(self, ctx: Context, value: t.Any) -> None:
+        """Validate that the value is within the allowed range.
+
+        :param ctx: The current context.
+        :param value: The value to validate.
+        :raises ValidationError: If the value is outside the allowed range.
+        """
+        if self.min_val is None and self.max_val is None:
+            return
+
+        import operator
+
+        lt_min: bool = self.min_val is not None and (
+            operator.le if self.min_open else operator.lt
+        )(value, self.min_val)
+        gt_max: bool = self.max_val is not None and (
+            operator.ge if self.max_open else operator.gt
+        )(value, self.max_val)
+
+        if lt_min or gt_max:
+            range_desc = self._get_validation_range_description()
+            raise ValidationError(
+                _("{value} is not in the range {range}.").format(
+                    value=value, range=range_desc
+                ),
+                ctx=ctx,
+                param=self,
+            )
+
+    def _validate_regex(self, ctx: Context, value: str) -> None:
+        """Validate that the string value matches the regex pattern.
+
+        :param ctx: The current context.
+        :param value: The string value to validate.
+        :raises ValidationError: If the value does not match the pattern.
+        """
+        if self.regex is None:
+            return
+
+        if not self.regex.match(value):
+            pattern_str = (
+                self.regex.pattern
+                if isinstance(self.regex.pattern, str)
+                else str(self.regex.pattern)
+            )
+            raise ValidationError(
+                _("{value!r} does not match the pattern {pattern!r}.").format(
+                    value=value, pattern=pattern_str
+                ),
+                ctx=ctx,
+                param=self,
+            )
+
+    def _validate_single_value(self, ctx: Context, value: t.Any) -> t.Any:
+        """Validate a single value (not multiple, not nargs tuple).
+
+        :param ctx: The current context.
+        :param value: The value to validate.
+        :return: The validated value (possibly modified).
+        """
+        if value is None:
+            return value
+
+        if isinstance(value, (int, float)) and (
+            self.min_val is not None or self.max_val is not None
+        ):
+            self._validate_range(ctx, value)
+
+        if isinstance(value, str) and self.regex is not None:
+            self._validate_regex(ctx, value)
+
+        if self.validation_callback is not None:
+            value = self.validation_callback(ctx, self, value)
+
+        return value
+
+    def _validate_value(self, ctx: Context, value: t.Any) -> t.Any:
+        """Validate the parameter value according to all validation rules.
+
+        This handles multiple values (multiple=True) and nargs tuples.
+
+        :param ctx: The current context.
+        :param value: The value to validate.
+        :return: The validated value (possibly modified).
+        """
+        if value is None:
+            return value
+
+        if self.multiple:
+            validated_values = []
+            for item in value:
+                if isinstance(item, tuple) and self.nargs > 1:
+                    validated = tuple(
+                        self._validate_single_value(ctx, sub_item)
+                        for sub_item in item
+                    )
+                    validated_values.append(validated)
+                else:
+                    validated_values.append(self._validate_single_value(ctx, item))
+            return tuple(validated_values)
+
+        if self.nargs > 1 and isinstance(value, tuple):
+            return tuple(
+                self._validate_single_value(ctx, item) for item in value
+            )
+
+        if self.nargs == -1 and isinstance(value, tuple):
+            return tuple(
+                self._validate_single_value(ctx, item) for item in value
+            )
+
+        return self._validate_single_value(ctx, value)
+
     def to_info_dict(self) -> dict[str, t.Any]:
         """Gather information that could be useful for a tool generating
         user-facing documentation.
@@ -2200,7 +2489,7 @@ class Parameter:
 
         .. versionadded:: 8.0
         """
-        return {
+        info_dict = {
             "name": self.name,
             "param_type_name": self.param_type_name,
             "opts": self.opts,
@@ -2215,6 +2504,27 @@ class Parameter:
             "default": self.default if self.default is not UNSET else None,
             "envvar": self.envvar,
         }
+
+        if self.min_val is not None:
+            info_dict["min_val"] = self.min_val
+        if self.max_val is not None:
+            info_dict["max_val"] = self.max_val
+        if self.min_open:
+            info_dict["min_open"] = self.min_open
+        if self.max_open:
+            info_dict["max_open"] = self.max_open
+        if self.regex is not None:
+            info_dict["regex"] = (
+                self.regex.pattern
+                if isinstance(self.regex.pattern, str)
+                else str(self.regex.pattern)
+            )
+        if self.requires:
+            info_dict["requires"] = self.requires
+        if self.exclusive_with:
+            info_dict["exclusive_with"] = self.exclusive_with
+
+        return info_dict
 
     def __repr__(self) -> str:
         return f"<{self.__class__.__name__} {self.name}>"
@@ -2419,7 +2729,8 @@ class Parameter:
         1. Type cast the value using :meth:`type_cast_value`.
         2. Check if the value is missing (see: :meth:`value_is_missing`), and raise
            :exc:`MissingParameter` if it is required.
-        3. If a :attr:`callback` is set, call it to have the value replaced by the
+        3. Validate the value using all validation rules (range, regex, etc.).
+        4. If a :attr:`callback` is set, call it to have the value replaced by the
            result of the callback. If the value was not set, the callback receive
            ``None``. This keep the legacy behavior as it was before the introduction of
            the :attr:`UNSET` sentinel.
@@ -2439,6 +2750,9 @@ class Parameter:
 
         if self.required and self.value_is_missing(value):
             raise MissingParameter(ctx=ctx, param=self)
+
+        if not self.value_is_missing(value):
+            value = self._validate_value(ctx, value)
 
         if self.callback is not None:
             # Legacy case: UNSET is not exposed directly to the callback, but converted
@@ -3040,6 +3354,8 @@ class Option(Parameter):
             extra_items.append(_("default: {default}").format(default=extra["default"]))
         if "range" in extra:
             extra_items.append(extra["range"])
+        if "pattern" in extra:
+            extra_items.append(extra["pattern"])
         if "required" in extra:
             extra_items.append(_(extra["required"]))
 
@@ -3127,6 +3443,22 @@ class Option(Parameter):
 
             if range_str:
                 extra["range"] = range_str
+
+        if self.min_val is not None or self.max_val is not None:
+            validation_range_str = self._get_validation_range_description()
+            if validation_range_str:
+                if "range" in extra:
+                    extra["range"] = f"{extra['range']}, {validation_range_str}"
+                else:
+                    extra["range"] = validation_range_str
+
+        if self.regex is not None:
+            pattern_str = (
+                self.regex.pattern
+                if isinstance(self.regex.pattern, str)
+                else str(self.regex.pattern)
+            )
+            extra["pattern"] = f"pattern: {pattern_str}"
 
         if self.required:
             extra["required"] = "required"

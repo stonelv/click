@@ -1,0 +1,20 @@
+$ advanced-validation
+
+  advanced-validation is an example showcasing Click's built-in
+  parameter validation and constraint mechanisms.
+
+  This example requires Click 8.3 or higher with the new
+  validation features.
+
+Features demonstrated:
+  - Range validation (min_val, max_val, min_open, max_open)
+  - Regex/pattern validation
+  - Parameter dependencies (requires)
+  - Mutual exclusivity (exclusive_with)
+  - Validation callbacks
+  - Help display with validation hints
+
+Usage:
+
+  $ pip install --editable .
+  $ advanced-validation --help
