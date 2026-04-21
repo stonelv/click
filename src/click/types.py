@@ -659,6 +659,107 @@ class FloatRange(_NumberRangeBase, FloatParamType):
         raise RuntimeError("Clamping is not supported for open bounds.")
 
 
+class Range(ParamType):
+    """Restrict a parameter value to a range of accepted values.
+
+    This is a generic range validator that can be used with any
+    comparable type. It wraps an existing type to add range validation.
+
+    If ``min`` or ``max`` are not passed, any value is accepted in that
+    direction. If ``min_open`` or ``max_open`` are enabled, the
+    corresponding boundary is not included in the range.
+
+    The range check is performed using Python's comparison operators,
+    so this works with any type that supports ``<``, ``<=``, ``>``, ``>=``.
+
+    :param base_type: The base type to use for conversion. If not provided,
+        the value is used as-is without conversion.
+    :param min: The minimum allowed value (inclusive by default).
+    :param max: The maximum allowed value (inclusive by default).
+    :param min_open: If True, the minimum value is exclusive (not included).
+    :param max_open: If True, the maximum value is exclusive (not included).
+
+    .. versionadded:: 8.3.0
+    """
+
+    name = "range"
+
+    def __init__(
+        self,
+        base_type: t.Any | None = None,
+        min: t.Any | None = None,
+        max: t.Any | None = None,
+        min_open: bool = False,
+        max_open: bool = False,
+    ) -> None:
+        self.base_type: ParamType | None = (
+            convert_type(base_type, None) if base_type is not None else None
+        )
+        self.min = min
+        self.max = max
+        self.min_open = min_open
+        self.max_open = max_open
+
+        if self.base_type is not None:
+            self.name = f"{self.base_type.name} range"
+
+    def to_info_dict(self) -> dict[str, t.Any]:
+        info_dict = super().to_info_dict()
+        info_dict.update(
+            base_type=self.base_type.to_info_dict() if self.base_type else None,
+            min=self.min,
+            max=self.max,
+            min_open=self.min_open,
+            max_open=self.max_open,
+        )
+        return info_dict
+
+    def convert(
+        self, value: t.Any, param: Parameter | None, ctx: Context | None
+    ) -> t.Any:
+        import operator
+
+        if self.base_type is not None:
+            rv = self.base_type.convert(value, param, ctx)
+        else:
+            rv = value
+
+        lt_min: bool = self.min is not None and (
+            operator.le if self.min_open else operator.lt
+        )(rv, self.min)
+        gt_max: bool = self.max is not None and (
+            operator.ge if self.max_open else operator.gt
+        )(rv, self.max)
+
+        if lt_min or gt_max:
+            self.fail(
+                _("{value} is not in the range {range}.").format(
+                    value=rv, range=self._describe_range()
+                ),
+                param,
+                ctx,
+            )
+
+        return rv
+
+    def _describe_range(self) -> str:
+        """Describe the range for use in help text."""
+        if self.min is None:
+            op = "<" if self.max_open else "<="
+            return f"x{op}{self.max}"
+
+        if self.max is None:
+            op = ">" if self.min_open else ">="
+            return f"x{op}{self.min}"
+
+        lop = "<" if self.min_open else "<="
+        rop = "<" if self.max_open else "<="
+        return f"{self.min}{lop}x{rop}{self.max}"
+
+    def __repr__(self) -> str:
+        return f"<Range {self._describe_range()}>"
+
+
 class BoolParamType(ParamType):
     name = "boolean"
 

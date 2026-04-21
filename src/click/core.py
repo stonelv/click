@@ -5,6 +5,7 @@ import enum
 import errno
 import inspect
 import os
+import re
 import sys
 import typing as t
 from collections import abc
@@ -2244,6 +2245,15 @@ class Parameter:
         deprecated: bool | str = False,
         requires: str | cabc.Sequence[str] | None = None,
         exclusive_with: str | cabc.Sequence[str] | None = None,
+        min_val: t.Any | None = None,
+        max_val: t.Any | None = None,
+        min_open: bool = False,
+        max_open: bool = False,
+        regex: str | re.Pattern[str] | None = None,
+        pattern: str | re.Pattern[str] | None = None,
+        validation_callback: (
+            t.Callable[[Context, Parameter, t.Any], t.Any] | None
+        ) = None,
     ) -> None:
         self.name: str | None
         self.opts: list[str]
@@ -2251,7 +2261,53 @@ class Parameter:
         self.name, self.opts, self.secondary_opts = self._parse_decls(
             param_decls or (), expose_value
         )
-        self.type: types.ParamType = types.convert_type(type, default)
+
+        base_type: types.ParamType = types.convert_type(type, default)
+
+        if min_val is not None or max_val is not None:
+            if isinstance(base_type, (types._NumberRangeBase, types.Range)):
+                if min_val is not None:
+                    base_type.min = min_val
+                if max_val is not None:
+                    base_type.max = max_val
+                base_type.min_open = min_open
+                base_type.max_open = max_open
+            else:
+                base_type = types.Range(
+                    base_type=base_type,
+                    min=min_val,
+                    max=max_val,
+                    min_open=min_open,
+                    max_open=max_open,
+                )
+
+        if pattern is not None:
+            regex = pattern
+
+        if regex is not None:
+            if isinstance(base_type, types.Pattern):
+                if isinstance(regex, str):
+                    base_type.regex = re.compile(regex)
+                else:
+                    base_type.regex = regex
+            else:
+                base_type = types.Pattern(regex=regex)
+
+        self.type: types.ParamType = base_type
+
+        if validation_callback is not None:
+            if callback is None:
+                callback = validation_callback
+            else:
+                original_callback = callback
+
+                def wrapped_callback(
+                    ctx: Context, param: Parameter, value: t.Any
+                ) -> t.Any:
+                    value = validation_callback(ctx, param, value)
+                    return original_callback(ctx, param, value)
+
+                callback = wrapped_callback
 
         # Default nargs to what the type tells us if we have that
         # information available.
@@ -3241,14 +3297,25 @@ class Option(Parameter):
                 extra["default"] = default_string
 
         if (
-            isinstance(self.type, types._NumberRangeBase)
+            isinstance(self.type, (types._NumberRangeBase, types.Range))
             # skip count with default range type
-            and not (self.count and self.type.min == 0 and self.type.max is None)
+            and not (
+                self.count
+                and isinstance(self.type, types._NumberRangeBase)
+                and self.type.min == 0
+                and self.type.max is None
+            )
         ):
-            range_str = self.type._describe_range()
+            if isinstance(self.type, types._NumberRangeBase):
+                range_str = self.type._describe_range()
+            else:
+                range_str = self.type._describe_range()
 
             if range_str:
-                extra["range"] = range_str
+                if "range" in extra:
+                    extra["range"] = f"{extra['range']}, {range_str}"
+                else:
+                    extra["range"] = range_str
 
         if isinstance(self.type, types.Pattern):
             pattern_str = self.type.regex.pattern
