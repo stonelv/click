@@ -1,0 +1,18 @@
+[project]
+name = "click-example-completion-generator"
+version = "1.0.0"
+description = "Click completion script generator example"
+requires-python = ">=3.10"
+dependencies = [
+    "click>=8.3",
+]
+
+[project.scripts]
+compgen = "compgen:cli"
+
+[build-system]
+requires = ["flit_core<4"]
+build-backend = "flit_core.buildapi"
+
+[tool.flit.module]
+name = "compgen"
